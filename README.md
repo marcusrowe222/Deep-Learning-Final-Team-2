@@ -20,6 +20,6 @@ p-values; the BED files contain pseudoreplicated peaks.
 
 ### Reference genome
 
-The [UCSC hg38 FASTA](https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/initial/hg38.fa.gz) is a suitable starting point (about 938 MB compressed). It contains the initial GRCh38 assembly and uses chromosome names such as `chr1`. The sequence is soft-masked: lowercase bases represent repeats, not missing DNA. See the [UCSC description](https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/) for details.
+[UCSC hg38 FASTA](https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/initial/hg38.fa.gz). It contains the initial GRCh38 assembly and uses chromosome names such as `chr1`. The sequence is soft-masked: lowercase bases represent repeats, not missing DNA. See the [UCSC description](https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/) for details.
 
-The authors' [training example](https://github.com/BoevaLab/ASAP/blob/main/tutorials/train.py) refers to an uncompressed `hg38.fa`. The exact FASTA file or patch version used in the paper has not been verified. Before processing, check that chromosome names and lengths match the bigWig files.
+The authors' [training example](https://github.com/BoevaLab/ASAP/blob/main/tutorials/train.py) refers to an uncompressed `hg38.fa`. We need to check that chromosome names and lengths match the bigWig files.
