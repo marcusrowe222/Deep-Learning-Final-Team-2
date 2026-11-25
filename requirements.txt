@@ -1,4 +1,5 @@
 numpy
-pyBigWig
 pandas
 matplotlib
+pyfaidx
+pybigtools
