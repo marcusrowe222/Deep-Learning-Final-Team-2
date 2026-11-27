@@ -1,9 +1,11 @@
 """Quick training loop: Poisson NLL loss + AdamW (as in Grover et al.), one fold or full 5-fold CV."""
 import copy
+import csv
 import math
 import os
 import time
 
+from matplotlib.figure import Figure
 import torch
 from torch.utils.data import DataLoader
 
@@ -36,6 +38,20 @@ def evaluate(model, loader, loss_fn, device, max_batches=None):
     return total_loss / max(n_batches, 1), pearson
 
 
+def save_training_curves(history, path):
+    fig = Figure(figsize=(10, 4))
+    loss_ax, pearson_ax = fig.subplots(1, 2)
+    epochs = [row["epoch"] for row in history]
+    loss_ax.plot(epochs, [row["train_loss"] for row in history], marker="o", label="Training")
+    loss_ax.plot(epochs, [row["val_loss"] for row in history], marker="o", label="Validation")
+    loss_ax.set(xlabel="Epoch", ylabel="Poisson NLL loss", title="Loss")
+    loss_ax.legend()
+    pearson_ax.plot(epochs, [row["val_pearson"] for row in history], marker="o")
+    pearson_ax.set(xlabel="Epoch", ylabel="Pearson r", title="Validation Pearson")
+    fig.tight_layout()
+    fig.savefig(path, dpi=150)
+
+
 def run_fold(cell_line, fold, epochs=10, batch_size=64, lr=1e-3, weight_decay=1e-2,
              patience=3, num_workers=0, max_batches=None, data_kwargs=None,
              ckpt_dir="checkpoints", seed=0, log_every=100):
@@ -62,10 +78,25 @@ def run_fold(cell_line, fold, epochs=10, batch_size=64, lr=1e-3, weight_decay=1e
     # the model ends in Softplus, so its output is already a rate (not a log-rate)
     loss_fn = torch.nn.PoissonNLLLoss(log_input=False)
 
+    os.makedirs(ckpt_dir, exist_ok=True)
+    prefix = os.path.join(ckpt_dir, f"{cell_line}_fold{fold}")
+    metrics_path = f"{prefix}_metrics.csv"
+    curves_path = f"{prefix}_curves.png"
+    test_metrics_path = f"{prefix}_test_metrics.csv"
+    metric_fields = ["epoch", "train_loss", "val_loss", "val_pearson", "epoch_seconds"]
+    test_fields = ["best_val_loss", "test_loss", "test_pearson"]
+    with open(metrics_path, "w", newline="") as f:
+        csv.DictWriter(f, fieldnames=metric_fields).writeheader()
+    with open(test_metrics_path, "w", newline="") as f:
+        csv.DictWriter(f, fieldnames=test_fields).writeheader()
+    history = []
+    save_training_curves(history, curves_path)
+
     best_val, best_state, bad_epochs = float("inf"), None, 0
     for epoch in range(epochs):
         model.train()
         t0, running = time.time(), 0.0
+        epoch_loss, train_batches = 0.0, 0
         for step, (x, y) in enumerate(train_dl):
             if max_batches is not None and step >= max_batches:
                 break
@@ -76,40 +107,65 @@ def run_fold(cell_line, fold, epochs=10, batch_size=64, lr=1e-3, weight_decay=1e
             loss = loss_fn(pred, y)
             loss.backward()
             opt.step()
-            running += loss.item()
+            loss_value = loss.item()
+            running += loss_value
+            epoch_loss += loss_value
+            train_batches += 1
             if (step + 1) % log_every == 0:
                 print(f"  fold {fold} epoch {epoch} step {step + 1}: train loss {running / log_every:.4f}")
                 running = 0.0
 
+        if train_batches == 0:
+            raise ValueError("No training batches were processed; check batch_size and max_batches.")
+        train_loss = epoch_loss / train_batches
         val_loss, val_r = evaluate(model, val_dl, loss_fn, device, max_batches)
-        print(f"fold {fold} epoch {epoch}: val loss {val_loss:.4f}  val Pearson {val_r:.4f}  ({time.time() - t0:.0f}s)")
+        epoch_seconds = time.time() - t0
+        print(f"fold {fold} epoch {epoch}: train loss {train_loss:.4f}  val loss {val_loss:.4f}  val Pearson {val_r:.4f}  ({epoch_seconds:.0f}s)")
 
         if val_loss < best_val:
             best_val, bad_epochs = val_loss, 0
             best_state = copy.deepcopy(model.state_dict())
-            os.makedirs(ckpt_dir, exist_ok=True)
             checkpoint = {
                 "model_state_dict": best_state,
                 "cell_line": cell_line,
                 "fold": fold,
                 "chromosomes": chromosomes,
             }
-            torch.save(checkpoint, os.path.join(ckpt_dir, f"{cell_line}_fold{fold}.pt"))
+            torch.save(checkpoint, f"{prefix}.pt")
         else:
             bad_epochs += 1
-            if bad_epochs >= patience:
-                print(f"fold {fold}: early stop (no val improvement for {patience} epochs)")
-                break
+
+        row = {
+            "epoch": epoch + 1,
+            "train_loss": train_loss,
+            "val_loss": val_loss,
+            "val_pearson": val_r,
+            "epoch_seconds": epoch_seconds,
+        }
+        with open(metrics_path, "a", newline="") as f:
+            csv.DictWriter(f, fieldnames=metric_fields).writerow(row)
+        history.append(row)
+        save_training_curves(history, curves_path)
+
+        if bad_epochs > 0 and bad_epochs >= patience:
+            print(f"fold {fold}: early stop (no val improvement for {patience} epochs)")
+            break
 
     model.load_state_dict(best_state)                     # test once, with the best-validation weights
     test_loss, test_r = evaluate(model, test_dl, loss_fn, device, max_batches)
     print(f"fold {fold} TEST: loss {test_loss:.4f}  Pearson {test_r:.4f}")
+    with open(test_metrics_path, "a", newline="") as f:
+        csv.DictWriter(f, fieldnames=test_fields).writerow({
+            "best_val_loss": best_val,
+            "test_loss": test_loss,
+            "test_pearson": test_r,
+        })
     return {"fold": fold, "best_val_loss": best_val, "test_loss": test_loss, "test_pearson": test_r}
 
 
 if __name__ == "__main__":                                # required on Windows when num_workers > 0
     # One fold:
-    # results = [run_fold("GM12878", fold=0)]
+    # results = [run_fold("GM12878", fold=0, max_batches=1)]
 
     # Full 5-fold cross validation (uncomment, and comment out the line above):
     for cell_line in CELL_LINES.keys():

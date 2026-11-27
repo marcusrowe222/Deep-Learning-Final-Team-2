@@ -33,4 +33,5 @@
 The full command trains 20 models sequentially (four cell lines, five folds
 each), using up to 10 epochs with early stopping. Checkpoints are saved in
 `checkpoints/`; back up existing files first because matching names can be
-overwritten. A stopped job does not automatically resume training.
+overwritten. The same folder contains per-epoch metrics CSVs, curve plots, and
+final test metrics CSVs. A stopped job does not automatically resume training.

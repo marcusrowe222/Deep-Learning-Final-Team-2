@@ -60,3 +60,18 @@ Into `/data/blacklist`
 
 New training checkpoints store model weights, the cell line, the fold number, and the train, validation, and test chromosome lists. Testing checks the saved lists against the current data loader before evaluating.
 
+Each cell-line/fold run also saves files in `checkpoints/` (or `ckpt_dir`):
+
+- `<cell_line>_fold<fold>_metrics.csv`: one row per completed epoch, with
+  1-based epoch number, mean training and validation loss, validation Pearson
+  correlation, and epoch time in seconds.
+- `<cell_line>_fold<fold>_curves.png`: training and validation loss curves and
+  the validation Pearson curve, updated after each epoch.
+- `<cell_line>_fold<fold>_test_metrics.csv`: best validation loss and the final
+  test loss and Pearson correlation. It has only a header until testing finishes.
+
+Loss uses all 512 bins; Pearson uses the central 256 bins pooled across
+windows. These files are overwritten when the same cell line and fold are run
+again, so back them up if needed. A smoke test using `max_batches` logs only
+the batches it processes.
+
