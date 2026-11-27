@@ -8,7 +8,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from Models.convnext_cnn import ConvNeXtCNN
-from data_loader import get_data_v2, N_FOLDS
+from data_loader import get_data_v2, get_split_chroms, N_FOLDS, CELL_LINES
 
 CENTER = slice(128, 384)  # central 256 of the 512 bins = central 1,024 bp
 
@@ -47,6 +47,7 @@ def run_fold(cell_line, fold, epochs=10, batch_size=64, lr=1e-3, weight_decay=1e
     torch.manual_seed(seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     data_kwargs = data_kwargs or {}
+    chromosomes = get_split_chroms(fold)
 
     train_ds = get_data_v2(cell_line, fold, "train", **data_kwargs)
     val_ds = get_data_v2(cell_line, fold, "val", **data_kwargs)
@@ -55,7 +56,7 @@ def run_fold(cell_line, fold, epochs=10, batch_size=64, lr=1e-3, weight_decay=1e
                           num_workers=num_workers, drop_last=True)
     val_dl = DataLoader(val_ds, batch_size=batch_size, num_workers=num_workers)
     test_dl = DataLoader(test_ds, batch_size=batch_size, num_workers=num_workers)
-
+    print(f'Using device: {device}')
     model = ConvNeXtCNN().to(device)                      # fresh weights for every fold
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     # the model ends in Softplus, so its output is already a rate (not a log-rate)
@@ -87,7 +88,13 @@ def run_fold(cell_line, fold, epochs=10, batch_size=64, lr=1e-3, weight_decay=1e
             best_val, bad_epochs = val_loss, 0
             best_state = copy.deepcopy(model.state_dict())
             os.makedirs(ckpt_dir, exist_ok=True)
-            torch.save(best_state, os.path.join(ckpt_dir, f"{cell_line}_fold{fold}.pt"))
+            checkpoint = {
+                "model_state_dict": best_state,
+                "cell_line": cell_line,
+                "fold": fold,
+                "chromosomes": chromosomes,
+            }
+            torch.save(checkpoint, os.path.join(ckpt_dir, f"{cell_line}_fold{fold}.pt"))
         else:
             bad_epochs += 1
             if bad_epochs >= patience:
@@ -102,10 +109,15 @@ def run_fold(cell_line, fold, epochs=10, batch_size=64, lr=1e-3, weight_decay=1e
 
 if __name__ == "__main__":                                # required on Windows when num_workers > 0
     # One fold:
-    results = [run_fold("GM12878", fold=0)]
+    # results = [run_fold("GM12878", fold=0)]
 
     # Full 5-fold cross validation (uncomment, and comment out the line above):
-    # results = [run_fold("GM12878", fold) for fold in range(N_FOLDS)]
-
-    for r in results:
-        print(r)
+    for cell_line in CELL_LINES.keys():
+        print(f'Training model for cell line {cell_line} with {N_FOLDS} folds')
+        results = []
+        # Do five-fold cross-validation 
+        for fold in range(N_FOLDS):
+            result = run_fold(cell_line, fold)
+            results.append(result)
+            for r in results:
+                print(r)

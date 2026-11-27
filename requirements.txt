@@ -3,3 +3,5 @@ pandas
 matplotlib
 pyfaidx
 pybigtools
+torchinfo
+torch
